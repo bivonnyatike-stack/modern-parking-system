@@ -1,3 +1,4 @@
+/*
 #include <iostream>
 #include <vector>
 #include <string>
@@ -313,5 +314,334 @@ int main() {
             }
         }
     }
+    return 0;
+}*/
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <unordered_map>
+#include <memory>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+#include <fstream>
+
+using namespace std;
+
+// --- DYNAMIC RATE SYSTEM ---
+struct TariffRate {
+    double minHours;
+    double maxHours;
+    double rate;
+};
+
+class RateManager {
+private:
+    vector<TariffRate> rates;
+    double vatPercentage;
+
+public:
+    RateManager() : vatPercentage(16.0) {
+        // Default Rate Configuration (Can be changed dynamically by Admin)
+        rates = {
+            {0.0, 0.5, 0.0},     // First 30 mins free
+            {0.5, 2.0, 50.0},    // Up to 2 hours: Ksh 50
+            {2.0, 4.0, 100.0},   // Up to 4 hours: Ksh 100
+            {4.0, 6.0, 300.0},   // Up to 6 hours: Ksh 300
+            {6.0, 999.0, 500.0}  // Above 6 hours: Ksh 500
+        };
+    }
+
+    void updateRates(const vector<TariffRate>& newRates) {
+        rates = newRates;
+        cout << "[ADMIN] Tariff rates updated successfully!\n";
+    }
+
+    void setVAT(double vat) {
+        vatPercentage = vat;
+        cout << "[ADMIN] VAT rate updated to " << vatPercentage << "%\n";
+    }
+
+    double getVAT() const { return vatPercentage; }
+
+    double calculateFee(double hoursSpent) const {
+        for (const auto& tier : rates) {
+            if (hoursSpent >= tier.minHours && hoursSpent <= tier.maxHours) {
+                return tier.rate;
+            }
+        }
+        return 500.0; // Fallback
+    }
+};
+
+// --- VEHICLE & PARKING BAY ENTITIES ---
+class Vehicle {
+public:
+    string plateNumber;
+    string ownerName;
+    string phoneNumber;
+    string model;
+    string type;
+    time_t entryTime;
+
+    Vehicle(string plate, string owner, string phone, string model, string type)
+        : plateNumber(plate), ownerName(owner), phoneNumber(phone), model(model), type(type) {
+        entryTime = time(0);
+    }
+};
+
+class ParkingSlot {
+private:
+    int id;
+    bool occupied;
+    shared_ptr<Vehicle> currentVehicle;
+
+public:
+    ParkingSlot(int slotId) : id(slotId), occupied(false), currentVehicle(nullptr) {}
+
+    int getId() const { return id; }
+    bool isOccupied() const { return occupied; }
+
+    void park(shared_ptr<Vehicle> v) {
+        currentVehicle = v;
+        occupied = true;
+    }
+
+    shared_ptr<Vehicle> removeVehicle() {
+        shared_ptr<Vehicle> v = currentVehicle;
+        currentVehicle = nullptr;
+        occupied = false;
+        return v;
+    }
+
+    shared_ptr<Vehicle> getVehicle() const { return currentVehicle; }
+};
+
+// --- AUDITABLE FINANCIAL RECORD ---
+struct AuditRecord {
+    string ticketCode;
+    string plateNumber;
+    double durationHours;
+    double totalAmount;
+    double vatAmount;
+    double netAmount;
+    string paymentMethod; // M-Pesa, Card, Cash
+    string timestamp;
+};
+
+// --- AUTOMATED PARKING SYSTEM ---
+class ParkingSystem {
+private:
+    vector<ParkingSlot> slots;
+    unordered_map<string, int> lookupTable; // Plate -> Slot ID
+    vector<AuditRecord> auditTrail;
+    RateManager rateManager;
+
+public:
+    ParkingSystem(int totalSlots) {
+        for (int i = 1; i <= totalSlots; ++i) {
+            slots.push_back(ParkingSlot(i));
+        }
+    }
+
+    // 1. Live Slot Availability & Web Exporter
+    void displayAvailableSlots() {
+        int availableCount = 0;
+        cout << "\n============================================\n";
+        cout << "    LIVE DRIVER VISUAL DISPLAY BOARD        \n";
+        cout << "============================================\n";
+        
+        for (const auto& slot : slots) {
+            if (!slot.isOccupied()) {
+                cout << "[ Slot " << slot.getId() << ": FREE ] ";
+                availableCount++;
+            } else {
+                cout << "[ Slot " << slot.getId() << ": OCCUPIED ] ";
+            }
+            if (slot.getId() % 5 == 0) cout << "\n";
+        }
+        cout << "\n--------------------------------------------\n";
+        cout << "TOTAL AVAILABLE BAYS: " << availableCount << " / " << slots.size() << "\n";
+        cout << "============================================\n";
+
+        // Export Live View for Web/Mobile API
+        exportWebJsonView();
+    }
+
+    void exportWebJsonView() {
+        ofstream jsonFile("live_slots.json");
+        jsonFile << "{\n  \"total_slots\": " << slots.size() << ",\n  \"slots\": [\n";
+        for (size_t i = 0; i < slots.size(); ++i) {
+            jsonFile << "    { \"id\": " << slots[i].getId() 
+                     << ", \"status\": \"" << (slots[i].isOccupied() ? "OCCUPIED" : "FREE") << "\" }";
+            if (i < slots.size() - 1) jsonFile << ",";
+            jsonFile << "\n";
+        }
+        jsonFile << "  ]\n}\n";
+        jsonFile.close();
+    }
+
+    // 2. Vehicle Check-In
+    void checkIn(string plate, string owner, string phone, string model, string type) {
+        if (lookupTable.find(plate) != lookupTable.end()) {
+            cout << "\n[ERROR] Vehicle with plate " << plate << " is already inside!\n";
+            return;
+        }
+
+        int targetSlot = -1;
+        for (auto& slot : slots) {
+            if (!slot.isOccupied()) {
+                targetSlot = slot.getId();
+                break;
+            }
+        }
+
+        if (targetSlot == -1) {
+            cout << "\n[ERROR] Parking Lot is FULL!\n";
+            return;
+        }
+
+        auto vehicle = make_shared<Vehicle>(plate, owner, phone, model, type);
+        slots[targetSlot - 1].park(vehicle);
+        lookupTable[plate] = targetSlot;
+
+        cout << "\n[CHECK-IN SUCCESSFUL]";
+        cout << "\nPlate: " << plate << " | Allocated Bay: Slot " << targetSlot << "\n";
+    }
+
+    // 3. Vehicle Check-Out & Payment Verification
+    void checkOut(string plate, double simulatedHours, int paymentChoice) {
+        if (lookupTable.find(plate) == lookupTable.end()) {
+            cout << "\n[ERROR] Plate number " << plate << " not found in system!\n";
+            return;
+        }
+
+        int slotId = lookupTable[plate];
+        auto vehicle = slots[slotId - 1].removeVehicle();
+        lookupTable.erase(plate);
+
+        double fee = rateManager.calculateFee(simulatedHours);
+        double vatRate = rateManager.getVAT();
+        double vatAmount = fee * (vatRate / (100.0 + vatRate));
+        double netAmount = fee - vatAmount;
+
+        string paymentMethod = (paymentChoice == 1) ? "M-Pesa" : (paymentChoice == 2) ? "Card" : "Cash";
+
+        cout << "\n============================================\n";
+        cout << "            EXIT BILLING RECEIPT            \n";
+        cout << "============================================\n";
+        cout << "Vehicle Plate : " << vehicle->plateNumber << "\n";
+        cout << "Duration      : " << simulatedHours << " Hours\n";
+        cout << "Total Fee     : Kshs " << fixed << setprecision(2) << fee << "\n";
+        cout << "   - Net Amount: Kshs " << netAmount << "\n";
+        cout << "   - VAT (" << vatRate << "%): Kshs " << vatAmount << "\n";
+        cout << "Payment Method: " << paymentMethod << "\n";
+        cout << "--------------------------------------------\n";
+        
+        // M-Pesa / Card Processing Simulation
+        if (paymentChoice == 1) {
+            cout << "[M-PESA] STK Push sent to " << vehicle->phoneNumber << "...\n";
+            cout << "[M-PESA] Payment Confirmed! Transaction ID: MP" << rand() % 899999 + 100000 << "\n";
+        } else if (paymentChoice == 2) {
+            cout << "[CARD] Processing POS transaction...\n";
+            cout << "[CARD] Approved by Bank!\n";
+        } else {
+            cout << "[CASH] Cash received at register.\n";
+        }
+
+        // Barrier Control Trigger
+        cout << "--------------------------------------------\n";
+        cout << "[BARRIER] Payment Confirmed -> Opening Exit Barrier Relay.\n";
+        cout << "============================================\n";
+
+        // Record Audit
+        time_t now = time(0);
+        string timeStr = ctime(&now);
+        timeStr.pop_back(); // Remove newline
+        auditTrail.push_back({"TICK-" + to_string(rand() % 9000 + 1000), plate, simulatedHours, fee, vatAmount, netAmount, paymentMethod, timeStr});
+    }
+
+    // 4. Admin Rate Adjustment
+    void updateTariff() {
+        double vat;
+        cout << "\nEnter New VAT Percentage (e.g., 16): ";
+        cin >> vat;
+        rateManager.setVAT(vat);
+    }
+
+    // 5. Auditable Financial & VAT Reconciliation Report
+    void generateAuditReport() {
+        double totalRev = 0, totalVat = 0, totalNet = 0;
+        cout << "\n=========================================================================\n";
+        cout << "              AUDITABLE FINANCIAL & VAT RECONCILIATION REPORT           \n";
+        cout << "=========================================================================\n";
+        cout << left << setw(12) << "Ticket" << setw(12) << "Plate" << setw(10) << "Method" 
+             << setw(12) << "Total (Ksh)" << setw(12) << "VAT (Ksh)" << setw(12) << "Net (Ksh)" << "\n";
+        cout << "-------------------------------------------------------------------------\n";
+
+        for (const auto& rec : auditTrail) {
+            cout << left << setw(12) << rec.ticketCode << setw(12) << rec.plateNumber 
+                 << setw(10) << rec.paymentMethod << setw(12) << fixed << setprecision(2) << rec.totalAmount 
+                 << setw(12) << rec.vatAmount << setw(12) << rec.netAmount << "\n";
+            totalRev += rec.totalAmount;
+            totalVat += rec.vatAmount;
+            totalNet += rec.netAmount;
+        }
+
+        cout << "-------------------------------------------------------------------------\n";
+        cout << "SUMMARY TOTALS:\n";
+        cout << "Gross Revenue Collected: Kshs " << totalRev << "\n";
+        cout << "Total VAT (Payable)    : Kshs " << totalVat << "\n";
+        cout << "Net Revenue            : Kshs " << totalNet << "\n";
+        cout << "=========================================================================\n";
+    }
+};
+
+int main() {
+    ParkingSystem system(10); // Initialized with 10 slots
+    int choice;
+
+    while (true) {
+        cout << "\n=== AUTOMATED PARKING MANAGEMENT SYSTEM ===\n";
+        cout << "1. Display Live Slot Board & Export Web View\n";
+        cout << "2. Register Vehicle Check-In\n";
+        cout << "3. Register Vehicle Check-Out & Process Payment\n";
+        cout << "4. Admin: Dynamic Rate & VAT Adjustment\n";
+        cout << "5. Admin: Generate Auditable Financial & VAT Report\n";
+        cout << "6. Exit\n";
+        cout << "Select Option: ";
+        cin >> choice;
+
+        if (choice == 1) {
+            system.displayAvailableSlots();
+        } else if (choice == 2) {
+            string plate, owner, phone, model, type;
+            cout << "Enter License Plate: "; cin >> plate;
+            cout << "Enter Owner Name: "; cin >> owner;
+            cout << "Enter Phone Number: "; cin >> phone;
+            cout << "Enter Vehicle Model: "; cin >> model;
+            cout << "Enter Vehicle Type (Car/Bike/Truck): "; cin >> type;
+            system.checkIn(plate, owner, phone, model, type);
+        } else if (choice == 3) {
+            string plate;
+            double hours;
+            int payChoice;
+            cout << "Enter License Plate: "; cin >> plate;
+            cout << "Enter Hours Spent (Simulated): "; cin >> hours;
+            cout << "Select Payment Method (1: M-Pesa, 2: Card, 3: Cash): "; cin >> payChoice;
+            system.checkOut(plate, hours, payChoice);
+        } else if (choice == 4) {
+            system.updateTariff();
+        } else if (choice == 5) {
+            system.generateAuditReport();
+        } else if (choice == 6) {
+            cout << "\nExiting System. Goodbye!\n";
+            break;
+        } else {
+            cout << "\nInvalid Selection. Retry.\n";
+        }
+    }
+
     return 0;
 }
