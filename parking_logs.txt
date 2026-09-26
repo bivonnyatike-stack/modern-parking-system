@@ -1,0 +1,3 @@
+1001 | KDA 001A | Slot #1 | Duration: 50.0 mins | Fee: Kshs. 100.0 | Date: 2026-09-26 13:57:56
+1001 | KBA 098S | Slot #1 | Duration: 0.31 mins | Fee: Kshs. 0.0 | Date: 2026-09-26 14:04:21
+1001 | KEA 001A | Slot #1 | Duration: 0.44 mins | Fee: Kshs. 0.0 | Date: 2026-09-26 14:18:22
